@@ -12,10 +12,18 @@ class PerformanceAnalyzer:
 
     def calculate_portfolio_returns(self, price_history: Dict[str, pd.DataFrame]) -> Dict[str, float]:
         """Calculate portfolio returns for different periods."""
-        returns = {}
+        returns = {
+            "today": 0.0,
+            "wtd": 0.0,
+            "mtd": 0.0,
+            "ytd": 0.0,
+        }
 
         # Prepare weighted prices
         total_current_value = (self.portfolio["shares"] * self.portfolio["current_price"]).sum()
+
+        if total_current_value == 0:
+            return returns
 
         for period_name, days in [
             ("today", 1),
@@ -23,37 +31,59 @@ class PerformanceAnalyzer:
             ("mtd", 21),
             ("ytd", 252),
         ]:
-            period_returns = []
-            weights = []
+            try:
+                period_returns = []
+                weights = []
 
-            for _, row in self.portfolio.iterrows():
-                ticker = row["ticker"]
-                if ticker not in price_history or price_history[ticker] is None:
-                    continue
+                for _, row in self.portfolio.iterrows():
+                    ticker = row["ticker"]
 
-                hist = price_history[ticker]
-                if hist is None or len(hist) < days + 1:
-                    continue
+                    # Skip if no data
+                    if ticker not in price_history or price_history[ticker] is None:
+                        continue
 
-                close_prices = hist["Close"]
-                if days == 1:
-                    period_return = float((close_prices.iloc[-1] - close_prices.iloc[-2]) / close_prices.iloc[-2])
+                    hist = price_history[ticker]
+                    if hist is None or len(hist) == 0:
+                        continue
+
+                    if len(hist) < days + 1:
+                        continue
+
+                    try:
+                        close_prices = hist["Close"]
+
+                        # Get scalar values
+                        current_price = float(close_prices.iloc[-1].item() if hasattr(close_prices.iloc[-1], 'item') else close_prices.iloc[-1])
+                        past_price = float(close_prices.iloc[-days - 1].item() if hasattr(close_prices.iloc[-days - 1], 'item') else close_prices.iloc[-days - 1])
+
+                        # Calculate return
+                        if past_price != 0:
+                            period_return = (current_price - past_price) / past_price
+                        else:
+                            period_return = 0.0
+
+                        # Calculate weight
+                        weight = (row["shares"] * row["current_price"]) / total_current_value
+
+                        period_returns.append(period_return)
+                        weights.append(weight)
+                    except Exception:
+                        continue
+
+                # Calculate weighted average return
+                if period_returns and weights:
+                    weights_sum = sum(weights)
+                    if weights_sum > 0:
+                        weighted_return = sum(r * w / weights_sum for r, w in zip(period_returns, weights)) * 100
+                        returns[period_name] = float(weighted_return)
+                    else:
+                        returns[period_name] = 0.0
                 else:
-                    period_return = float((close_prices.iloc[-1] - close_prices.iloc[-days - 1]) / close_prices.iloc[-days - 1])
-
-                weight = float((row["shares"] * row["current_price"]) / total_current_value)
-                period_returns.append(period_return)
-                weights.append(weight)
-
-            if period_returns and weights:
-                # Normalize weights to sum to 1.0 (in case some positions were excluded)
-                weights_sum = sum(weights)
-                weighted_return = float(sum(r * w / weights_sum for r, w in zip(period_returns, weights)) * 100)
-                returns[period_name] = weighted_return
-            else:
+                    returns[period_name] = 0.0
+            except Exception:
                 returns[period_name] = 0.0
 
-        return {k: float(v) for k, v in returns.items()}
+        return returns
 
     def calculate_benchmark_returns(self, price_history: Dict[str, pd.DataFrame]) -> Dict[str, Dict[str, float]]:
         """Calculate benchmark returns (SPY, QQQ)."""
@@ -63,30 +93,45 @@ class PerformanceAnalyzer:
             if benchmark not in price_history or price_history[benchmark] is None:
                 continue
 
-            hist = price_history[benchmark]
-            close_prices = hist["Close"]
-            returns = {}
-
-            for period_name, days in [
-                ("today", 1),
-                ("wtd", 5),
-                ("mtd", 21),
-                ("ytd", 252),
-            ]:
-                if len(close_prices) < days + 1:
-                    returns[period_name] = 0.0
+            try:
+                hist = price_history[benchmark]
+                if hist is None or len(hist) == 0:
                     continue
 
-                if days == 1:
-                    period_return = float((close_prices.iloc[-1] - close_prices.iloc[-2]) / close_prices.iloc[-2] * 100)
-                else:
-                    period_return = float(
-                        (close_prices.iloc[-1] - close_prices.iloc[-days - 1]) / close_prices.iloc[-days - 1] * 100
-                    )
+                close_prices = hist["Close"]
+                returns = {
+                    "today": 0.0,
+                    "wtd": 0.0,
+                    "mtd": 0.0,
+                    "ytd": 0.0,
+                }
 
-                returns[period_name] = period_return
+                for period_name, days in [
+                    ("today", 1),
+                    ("wtd", 5),
+                    ("mtd", 21),
+                    ("ytd", 252),
+                ]:
+                    try:
+                        if len(close_prices) < days + 1:
+                            returns[period_name] = 0.0
+                            continue
 
-            benchmark_returns[benchmark] = returns
+                        current = float(close_prices.iloc[-1].item() if hasattr(close_prices.iloc[-1], 'item') else close_prices.iloc[-1])
+                        past = float(close_prices.iloc[-days - 1].item() if hasattr(close_prices.iloc[-days - 1], 'item') else close_prices.iloc[-days - 1])
+
+                        if past != 0:
+                            period_return = (current - past) / past * 100
+                        else:
+                            period_return = 0.0
+
+                        returns[period_name] = float(period_return)
+                    except Exception:
+                        returns[period_name] = 0.0
+
+                benchmark_returns[benchmark] = returns
+            except Exception:
+                continue
 
         return benchmark_returns
 
