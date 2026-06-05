@@ -24,7 +24,7 @@ class TechnicalAnalyzer:
 
         result = {
             "ticker": ticker,
-            "current_price": float(close_prices.iloc[-1]),
+            "current_price": float(close_prices.iloc[-1].item() if hasattr(close_prices.iloc[-1], 'item') else close_prices.iloc[-1]),
         }
 
         # RSI
